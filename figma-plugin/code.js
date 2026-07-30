@@ -303,6 +303,78 @@ const handlers = {
     figma.currentPage.appendChild(clone);
     figma.viewport.scrollAndZoomIntoView([clone]);
     return { newFrameId: clone.id };
+  },
+
+  dump_components: async ({ pageOnly = true }) => {
+    const scope = pageOnly ? figma.currentPage : figma.root;
+    const nodes = scope.findAll(n => n.type === 'COMPONENT' || n.type === 'COMPONENT_SET');
+    return {
+      count: nodes.length,
+      pageOnly,
+      components: nodes.map(c => ({
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        description: c.description || '',
+        ...(c.type === 'COMPONENT_SET' ? {
+          variantGroupProperties: (c.variantGroupProperties || []).map(p => ({
+            name: p.name,
+            type: p.type,
+            values: p.values
+          })),
+          variants: c.children.filter(v => v.type === 'COMPONENT').map(v => ({
+            id: v.id,
+            name: v.name,
+          }))
+        } : {})
+      }))
+    };
+  },
+
+  dump_tokens: async () => {
+    const paints = figma.getLocalPaintStyles().map(s => ({
+      id: s.id, name: s.name, paints: s.paints.map(p => ({
+        type: p.type,
+        color: p.type === 'SOLID' && p.color ? { r: p.color.r, g: p.color.g, b: p.color.b } : null,
+        opacity: p.type === 'SOLID' && p.opacity != null ? p.opacity : null
+      }))
+    }));
+    const texts = figma.getLocalTextStyles().map(s => ({
+      id: s.id, name: s.name, fontSize: s.fontSize, fontName: s.fontName,
+      lineHeight: s.lineHeight, letterSpacing: s.letterSpacing
+    }));
+    const effects = figma.getLocalEffectStyles().map(s => ({
+      id: s.id, name: s.name, effects: s.effects.map(e => ({
+        type: e.type,
+        color: e.color ? { r: e.color.r, g: e.color.g, b: e.color.b, a: e.color.a } : null,
+        offset: e.offset, radius: e.radius, spread: e.spread
+      }))
+    }));
+    let variables = [];
+    try {
+      variables = figma.variables.getLocalVariableCollections().map(col => ({
+        id: col.id, name: col.name,
+        modes: col.modes.map(m => ({ name: m.name, modeId: m.modeId })),
+        variables: col.variableIds.map(vid => {
+          const v = figma.variables.getVariableById(vid);
+          return v ? { id: v.id, name: v.name, resolvedType: v.resolvedType } : null;
+        }).filter(Boolean)
+      }));
+    } catch (e) { /* variables API may not be available in older Figma versions */ }
+    return { paints, texts, effects, variables };
+  },
+
+  dump_selection: async () => {
+    const nodes = figma.currentPage.selection;
+    return {
+      count: nodes.length,
+      nodes: nodes.map(n => ({
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        x: n.x, y: n.y, width: n.width, height: n.height
+      }))
+    };
   }
 };
 

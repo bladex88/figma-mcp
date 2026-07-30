@@ -4,6 +4,8 @@ import { StdioServerTransport }  from '@modelcontextprotocol/sdk/server/stdio.js
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer }       from 'ws';
 import http                      from 'http';
+import fs                        from 'fs';
+import path                      from 'path';
 import { barChart, lineChart, comboChart } from './chart-svg.js';
 
 const WS_PORT   = parseInt(process.env.WS_PORT || '9001');
@@ -54,6 +56,13 @@ function sendToFigma(command, payload = {}) {
 const ok  = t => ({ content: [{ type: 'text', text: t }] });
 const err = t => ({ content: [{ type: 'text', text: `Error: ${t}` }], isError: true });
 
+function saveJson(data, filePath) {
+  const abs = path.resolve(filePath);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, JSON.stringify(data, null, 2), 'utf8');
+  return abs;
+}
+
 const TOOLS = [
   { name: 'ping_figma',     description: 'Check Figma plugin connection.',             inputSchema: { type: 'object', properties: {} } },
   { name: 'list_frames',    description: 'List all frames on the current Figma page.', inputSchema: { type: 'object', properties: {} } },
@@ -67,6 +76,9 @@ const TOOLS = [
   { name: 'focus_frame',    description: 'Zoom viewport to a frame.',                   inputSchema: { type: 'object', required: ['frameId'], properties: { frameId:{type:'string'} } } },
   { name: 'set_fill_color', description: 'Set fill color of a node.',                   inputSchema: { type: 'object', required: ['nodeId','color'], properties: { nodeId:{type:'string'}, color:{type:'string'} } } },
   { name: 'duplicate_frame',description: 'Duplicate a frame.',                          inputSchema: { type: 'object', required: ['frameId'], properties: { frameId:{type:'string'}, newName:{type:'string'}, offsetX:{type:'number'} } } },
+  { name: 'dump_components_to_json', description: 'Dump all components and component sets from Figma to JSON.', inputSchema: { type: 'object', properties: { pageOnly:{type:'boolean', description:'Limit to current page (default true)'}, filePath:{type:'string', description:'Optional absolute path to write JSON file'} } } },
+  { name: 'dump_tokens_to_json',     description: 'Dump local styles and variables (tokens) from Figma to JSON.', inputSchema: { type: 'object', properties: { filePath:{type:'string', description:'Optional absolute path to write JSON file'} } } },
+  { name: 'dump_selection_to_json',  description: 'Dump the currently selected Figma nodes to JSON.', inputSchema: { type: 'object', properties: { filePath:{type:'string', description:'Optional absolute path to write JSON file'} } } },
 ];
 
 // ── MCP server ───────────────────────────────────────────────────────────────
@@ -104,6 +116,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (name === 'focus_frame')    { await sendToFigma('focus_frame', a);      return ok(`Focused`); }
     if (name === 'set_fill_color') { await sendToFigma('set_fill_color', a);   return ok(`Fill set to ${a.color}`); }
     if (name === 'duplicate_frame'){ const r=await sendToFigma('duplicate_frame',a); return ok(`Duplicated as "${a.newName}" (${r.newFrameId})`); }
+    if (name === 'dump_components_to_json') {
+      const r = await sendToFigma('dump_components', { pageOnly: a.pageOnly !== false });
+      const text = JSON.stringify(r, null, 2);
+      if (a.filePath) saveJson(r, a.filePath);
+      return ok(text + (a.filePath ? `\n\nSaved to: ${path.resolve(a.filePath)}` : ''));
+    }
+    if (name === 'dump_tokens_to_json') {
+      const r = await sendToFigma('dump_tokens');
+      const text = JSON.stringify(r, null, 2);
+      if (a.filePath) saveJson(r, a.filePath);
+      return ok(text + (a.filePath ? `\n\nSaved to: ${path.resolve(a.filePath)}` : ''));
+    }
+    if (name === 'dump_selection_to_json') {
+      const r = await sendToFigma('dump_selection');
+      const text = JSON.stringify(r, null, 2);
+      if (a.filePath) saveJson(r, a.filePath);
+      return ok(text + (a.filePath ? `\n\nSaved to: ${path.resolve(a.filePath)}` : ''));
+    }
     return err(`Unknown tool: ${name}`);
   } catch(e) { return err(e.message); }
 });
